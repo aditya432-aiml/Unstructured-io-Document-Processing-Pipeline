@@ -81,3 +81,25 @@ uv sync
 ```
 
 ---
+
+```text
+PDF
+ ↓
+Unstructured IO (extract + preprocess)
+ ↓
+Normalize schema
+ ↓
+Chunking
+ ↓
+Embeddings
+ ↓
+ChromaDB
+```
+
+For your use case (Open Source Unstructured, NOT API), this is stack:
+
+* `unstructured` → extraction + semantic elements
+* custom normalization layer → stable schema
+* `chunk_by_title()` → intelligent chunking
+* `sentence-transformers` → embeddings
+* `chromadb` → vector storage
