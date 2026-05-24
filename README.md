@@ -1,24 +1,29 @@
 # Unstructured-io-Document-Processing-Pipeline
 
-This project demonstrates an end-to-end document processing pipeline for PDF ingestion, semantic extraction, chunking, embedding generation, and vector search.
+This project turns a PDF into searchable embeddings and stores the result in a persistent ChromaDB collection.
 
 ## What this project does
 
-The notebook in this repository walks through the following workflow:
+The repository currently supports two ways to run the pipeline:
 
-1. Extract semantic elements from a PDF using `unstructured`
-2. Normalize the output into a consistent schema
+1. A notebook workflow in `unstructred-io-document-preprocessing.ipynb`
+2. A script-based workflow in `main.py`
+
+Both workflows follow the same steps:
+
+1. Extract semantic elements from the PDF with `unstructured`
+2. Normalize the output into a stable schema
 3. Chunk the document using `chunk_by_title()`
 4. Generate embeddings with `sentence-transformers`
-5. Store the chunks and embeddings in ChromaDB
-6. Run a semantic query against the stored vectors
+5. Store chunk metadata and vectors in ChromaDB
+6. Run semantic search against the stored vectors
 
 ## Project structure
 
 - `README.md` — project overview and setup instructions
-- `main.py` — Python entry point for the pipeline
-- `unstructred-io-document-preprocessing.ipynb` — notebook version of the workflow
-- `Training_Data/` — sample PDF files used for processing
+- `main.py` — script entry point for the pipeline
+- `unstructred-io-document-preprocessing.ipynb` — notebook version of the same workflow
+- `Training_Data/` — sample PDF input files
 - `chroma_db/` — persistent ChromaDB storage directory
 
 ## Prerequisites
@@ -27,7 +32,7 @@ Before you begin, make sure the following are installed:
 
 - [Python 3.13](https://www.python.org/downloads/)
 - [uv](https://github.com/astral-sh/uv) — Python package and project manager
-- Tesseract (optional but recommended for OCR-heavy PDFs)
+- Tesseract (recommended for OCR-heavy PDFs)
 
 > The current project configuration declares Python 3.13 in `pyproject.toml`.
 
@@ -105,11 +110,28 @@ If you are using OCR on macOS, ensure Homebrew's Tesseract binary is available:
 which tesseract
 ```
 
-## Running the notebook
+## Running the project
+
+### Option A — Jupyter notebook
 
 Open `unstructred-io-document-preprocessing.ipynb` in Jupyter or VS Code and run the cells in order.
 
-The notebook expects the sample PDF to be available in `Training_Data/` and stores the vector database in `./chroma_db`.
+The notebook expects the source PDF to be available in `Training_Data/` and writes the vector store to `./chroma_db`.
+
+### Option B — Python script
+
+Run the script directly:
+
+```bash
+python main.py
+```
+
+The current script uses the following defaults:
+
+- Source file: `Training_Data/AML_NOTES_UNIT_1_2_3_4_5_merged.pdf`
+- Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
+- ChromaDB collection: `single_pdf_collection`
+- Storage path: `./chroma_db`
 
 ## Current dependencies
 
@@ -140,6 +162,6 @@ ChromaDB
 
 ## Notes
 
-- The notebook is the best place to start if you want to understand the full flow.
-- `main.py` can be expanded later to turn the notebook logic into a reusable script.
-- The current toy example uses a single PDF and writes embeddings to a persistent ChromaDB collection.
+- The notebook and `main.py` share the same pipeline logic.
+- `main.py` now stores richer metadata, including `document_id`, `chunk_id`, `element_type`, `page_number`, `section`, `source_file`, and `created_at`.
+- The current example targets a single PDF and persists the embeddings in a local ChromaDB store.
