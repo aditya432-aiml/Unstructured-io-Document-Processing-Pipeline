@@ -1,17 +1,14 @@
 # Unstructured-io-Document-Processing-Pipeline
 
-This project turns a PDF into searchable embeddings and stores the result in a persistent ChromaDB collection.
+This project turns PDFs into searchable embeddings and stores the results in a persistent ChromaDB collection.
 
 ## What this project does
 
-The repository currently supports two ways to run the pipeline:
+The current pipeline is centered on `multi_pdf_parsing_pipeline.py`, which processes all PDFs found under `Training_Data/`.
 
-1. A notebook workflow in `unstructred-io-document-preprocessing.ipynb`
-2. A script-based workflow in `main.py`
+The workflow is:
 
-Both workflows follow the same steps:
-
-1. Extract semantic elements from the PDF with `unstructured`
+1. Extract semantic elements from each PDF with `unstructured`
 2. Normalize the output into a stable schema
 3. Chunk the document using `chunk_by_title()`
 4. Generate embeddings with `sentence-transformers`
@@ -21,7 +18,8 @@ Both workflows follow the same steps:
 ## Project structure
 
 - `README.md` — project overview and setup instructions
-- `main.py` — script entry point for the pipeline
+- `multi_pdf_parsing_pipeline.py` — current entry point for the multi-PDF pipeline
+- `main.py` — legacy single-PDF workflow
 - `unstructred-io-document-preprocessing.ipynb` — notebook version of the same workflow
 - `Training_Data/` — sample PDF input files
 - `chroma_db/` — persistent ChromaDB storage directory
@@ -116,22 +114,33 @@ which tesseract
 
 Open `unstructred-io-document-preprocessing.ipynb` in Jupyter or VS Code and run the cells in order.
 
-The notebook expects the source PDF to be available in `Training_Data/` and writes the vector store to `./chroma_db`.
+The notebook expects PDFs to be available in `Training_Data/` and writes the vector store to `./chroma_db`.
 
-### Option B — Python script
+### Option B — Current Python script
 
-Run the script directly:
+Run the current multi-PDF pipeline directly:
+
+```bash
+python multi_pdf_parsing_pipeline.py
+```
+
+This script:
+
+- discovers every PDF under `Training_Data/`
+- processes all discovered PDFs
+- stores embeddings in the `multi_pdf_collection` ChromaDB collection
+- persists metadata including `document_id`, `chunk_id`, `element_type`, `page_number`, `section`, `source_file`, and `created_at`
+- runs a final semantic search query for "What is k means clustering?"
+
+### Option C — Legacy single-PDF script
+
+If you need the older workflow, run:
 
 ```bash
 python main.py
 ```
 
-The current script uses the following defaults:
-
-- Source file: `Training_Data/AML_NOTES_UNIT_1_2_3_4_5_merged.pdf`
-- Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
-- ChromaDB collection: `single_pdf_collection`
-- Storage path: `./chroma_db`
+That script uses `Training_Data/AML_NOTES_UNIT_1_2_3_4_5_merged.pdf` as its source file.
 
 ## Current dependencies
 
@@ -162,6 +171,6 @@ ChromaDB
 
 ## Notes
 
-- The notebook and `main.py` share the same pipeline logic.
-- `main.py` now stores richer metadata, including `document_id`, `chunk_id`, `element_type`, `page_number`, `section`, `source_file`, and `created_at`.
-- The current example targets a single PDF and persists the embeddings in a local ChromaDB store.
+- `multi_pdf_parsing_pipeline.py` is the active workflow.
+- The current pipeline stores richer metadata, including `document_id`, `chunk_id`, `element_type`, `page_number`, `section`, `source_file`, and `created_at`.
+- The active ChromaDB collection is `multi_pdf_collection`, and the data is persisted in `./chroma_db`.

@@ -2,14 +2,14 @@
 # PDF → ChromaDB Semantic Search Pipeline
 # =============================================================================
 # Workflow:
-#   1. Extract semantic elements from a PDF using `unstructured`
+#   1. Extract semantic elements from each PDF using `unstructured`
 #   2. Normalize elements into a stable schema
 #   3. Chunk the document by headings and section boundaries
 #   4. Generate vector embeddings using a sentence-transformer model
-#   5. Store chunks + embeddings in a persistent ChromaDB collection
+#   5. Store chunks + metadata in a persistent ChromaDB collection
 #   6. Run a semantic search query against the collection
 #
-# Input  : Training_Data/<your_pdf>.pdf
+# Input  : Training_Data/**/*.pdf
 # Output : ./chroma_db  (persistent vector store)
 # =============================================================================
 
@@ -164,13 +164,13 @@ def chunk_elements(elements):
 
 
 # ---------------------------------------------------------------------------
-# Step 4 — Embedding Generation (model pre-loaded, passed in)
+# Step 4 — Embedding Generation (model loaded once and reused)
 # ---------------------------------------------------------------------------
 def embed_chunks(chunks, embedding_model):
     """
     Encode chunks using an already-loaded SentenceTransformer model.
-    Replaces generate_embeddings() when processing multiple PDFs so the
-    model is not reloaded on every iteration.
+    The model is loaded once in main() and reused across every PDF in
+    Training_Data/ so the pipeline avoids repeated model initialization.
     """
     print(f"\n{'='*60}")
     print(f"[Step 4] Generating embeddings for {len(chunks)} chunks")
@@ -184,12 +184,13 @@ def embed_chunks(chunks, embedding_model):
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — ChromaDB Storage (collection pre-opened, passed in)
+# Step 5 — ChromaDB Storage (collection opened once and reused)
 # ---------------------------------------------------------------------------
 def store_chunks(collection, chunks, embeddings, source_file):
     """
-    Identical to initialize_chromadb_and_store_chunks() but accepts an
-    already-open collection so it isn't recreated for every PDF.
+    Persist chunk embeddings and metadata into the provided ChromaDB
+    collection. The collection is opened once in main() and reused across
+    all processed PDFs.
     """
     print(f"\n{'='*60}")
     print(f"[Step 5] Storing chunks from: {source_file}")
@@ -277,17 +278,17 @@ def main():
     for f in pdf_files:
         print(f"  • {f}")
 
-    # Load the embedding model once — reused across all PDFs
+    # Load the embedding model once and reuse it for every PDF
     print(f"\n[Info] Loading embedding model: {EMBEDDING_MODEL_NAME}")
     embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-    # Open (or create) the ChromaDB collection once
+    # Open or create the ChromaDB collection once and reuse it for every PDF
     client     = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
 
 
-    # Process each PDF
+    # Process each PDF in the Training_Data/ tree
     for pdf_path in pdf_files:
         print(f"\n{'#'*60}")
         print(f"  Processing: {pdf_path}")
@@ -295,15 +296,15 @@ def main():
 
         try:
             elements   = partition_pdf_and_print_elements(pdf_path)
-            normalize_elements(elements)                        # for logging
+            normalize_elements(elements)                        # print a normalized sample for inspection
             chunks     = chunk_elements(elements)
-            embeddings = embed_chunks(chunks, embedding_model)  # see helper below
+            embeddings = embed_chunks(chunks, embedding_model)
             store_chunks(collection, chunks, embeddings, pdf_path)
         except Exception as e:
             print(f"[Error] Failed to process {pdf_path}: {e}")
             continue
 
-    # Run a single query across the whole collection at the end
+    # Run a fixed semantic search query against the full collection
     query_chromadb(collection, embedding_model, question="What is k means clustering?")
 
     print("\n[Done] Pipeline completed successfully.")
