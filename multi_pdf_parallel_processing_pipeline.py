@@ -3,8 +3,8 @@
 # =============================================================================
 # Workflow:
 #   1. Extract semantic elements from each PDF using `unstructured`
-#   2. Normalize elements into a stable schema
-#   3. Chunk the document by headings and section boundaries
+#   2. Chunk the document by headings and section boundaries
+#   3. Normalize chunks into a consistent metadata schema
 #   4. Generate vector embeddings using a sentence-transformer model
 #   5. Store chunks + metadata in a persistent ChromaDB collection
 #   6. Run a semantic search query against the collection
@@ -38,7 +38,7 @@ os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ["PATH"]
 # ---------------------------------------------------------------------------
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DB_PATH       = "./chroma_db"
-COLLECTION_NAME      = "new_multi_pdf_collection"
+COLLECTION_NAME      = "new_multi_pdf_pipeline_collection"
 
 
 # ---------------------------------------------------------------------------
@@ -82,48 +82,7 @@ def partition_pdf_and_print_elements(source_file):
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Normalization
-# ---------------------------------------------------------------------------
-def normalize_elements(elements):
-    """
-    Flatten heterogeneous unstructured elements into a uniform dictionary schema.
-    This decouples downstream logic from unstructured's internal object types.
-
-    Args:
-        elements (list): Raw unstructured element objects.
-
-    Returns:
-        list[dict]: Normalized document records.
-    """
-    print(f"\n{'='*60}")
-    print(f"[Step 2] Normalizing {len(elements)} elements")
-    print(f"{'='*60}")
-
-    normalized_docs = []
-
-    for idx, el in enumerate(elements):
-        doc = {
-            "id":          f"doc_{idx}",
-            "type":        el.category,
-            "text":        el.text,
-            "page_number": getattr(el.metadata, "page_number", None),
-            "filename":    getattr(el.metadata, "filename", None),
-            "languages":   getattr(el.metadata, "languages", None),
-            "coordinates": str(getattr(el.metadata, "coordinates", None)),
-        }
-        normalized_docs.append(doc)
-
-    if normalized_docs:
-        print(f"[Step 2] ✓ Normalization complete — sample record (index 0):")
-        print(f"  {normalized_docs[0]}\n")
-    else:
-        print("[Step 2] ⚠ Warning: No elements were normalized. Check the PDF input.\n")
-
-    return normalized_docs
-
-
-# ---------------------------------------------------------------------------
-# Step 3 — Chunking
+# Step 2 — Chunking
 # ---------------------------------------------------------------------------
 def chunk_elements(elements):
     """
@@ -142,7 +101,7 @@ def chunk_elements(elements):
         list: Chunked unstructured element objects.
     """
     print(f"\n{'='*60}")
-    print(f"[Step 3] Chunking elements by title/section boundaries")
+    print(f"[Step 2] Chunking elements by title/section boundaries")
     print(f"{'='*60}")
 
     chunks = chunk_by_title(
@@ -152,7 +111,7 @@ def chunk_elements(elements):
         combine_text_under_n_chars=200,
     )
 
-    print(f"[Step 3] ✓ Created {len(chunks)} chunks\n")
+    print(f"[Step 2] ✓ Created {len(chunks)} chunks\n")
 
     # Preview the first 3 chunks
     print("--- Preview: first 3 chunks ---")
@@ -162,6 +121,46 @@ def chunk_elements(elements):
         print("  " + "-" * 76)
 
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# Step 3 — Normalization
+# ---------------------------------------------------------------------------
+def normalize_elements(elements):
+    """
+    Flatten heterogeneous chunk objects into a uniform dictionary schema.
+    This decouples downstream logic from unstructured's internal object types.
+
+    Args:
+        elements (list): Chunk objects returned by chunk_elements.
+
+    Returns:
+        list[dict]: Normalized document records.
+    """
+    print(f"\n{'='*60}")
+    print(f"[Step 3] Normalizing {len(elements)} chunks")
+    print(f"{'='*60}")
+
+    normalized_docs = []
+
+    for idx, el in enumerate(elements):
+        doc = {
+            "id":           f"chunk_{idx}",
+            "text":         el.text.strip(),
+            "element_type": el.category,
+            "page_number":  getattr(el.metadata, "page_number", None) or 0,
+            "section":      getattr(el.metadata, "section", None) or
+                            getattr(el.metadata, "title",   None) or "",
+        }
+        normalized_docs.append(doc)
+
+    if normalized_docs:
+        print(f"[Step 3] ✓ Normalization complete — sample record (index 0):")
+        print(f"  {normalized_docs[0]}\n")
+    else:
+        print("[Step 3] ⚠ Warning: No elements were normalized. Check the PDF input.\n")
+
+    return normalized_docs
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +176,7 @@ def embed_chunks(chunks, embedding_model):
     print(f"[Step 4] Generating embeddings for {len(chunks)} chunks")
     print(f"{'='*60}")
 
-    chunk_texts = [chunk.text for chunk in chunks]
+    chunk_texts = [chunk["text"] for chunk in chunks]
     embeddings  = embedding_model.encode(
         chunk_texts,
         batch_size=64,
@@ -210,15 +209,14 @@ def store_chunks(collection, chunks, embeddings, source_file):
     ids, documents, embeds, metadatas = [], [], [], []
     for i, chunk in enumerate(chunks):
         ids.append(str(uuid.uuid4()))
-        documents.append(chunk.text.strip())
+        documents.append(chunk["text"])
         embeds.append(embeddings[i].tolist())
         metadatas.append({
             "document_id":  document_id,
             "chunk_id":     f"chunk_{i}",
-            "element_type": chunk.category,
-            "page_number":  getattr(chunk.metadata, "page_number", None) or 0,
-            "section":      getattr(chunk.metadata, "section", None) or
-                            getattr(chunk.metadata, "title",   None) or "",
+            "element_type": chunk["element_type"],
+            "page_number":  chunk["page_number"],
+            "section":      chunk["section"],
             "source_file":  source_file,
             "created_at":   created_at,
         })
@@ -276,11 +274,11 @@ def process_single_pdf(pdf_path):
         print(f"  Processing: {pdf_path}")
         print(f"{'#'*60}")
 
-        elements   = partition_pdf_and_print_elements(pdf_path)
-        normalize_elements(elements)
-        chunks     = chunk_elements(elements)
-        embeddings = embed_chunks(chunks, embedding_model)
-        store_chunks(collection, chunks, embeddings, pdf_path)
+        elements          = partition_pdf_and_print_elements(pdf_path)
+        chunks            = chunk_elements(elements)
+        normalized_chunks = normalize_elements(chunks)   # normalize the chunks after chunking the raw elements
+        embeddings        = embed_chunks(normalized_chunks, embedding_model)
+        store_chunks(collection, normalized_chunks, embeddings, pdf_path)
         print(f"[Done] Finished: {pdf_path}")
 
 # ---------------------------------------------------------------------------

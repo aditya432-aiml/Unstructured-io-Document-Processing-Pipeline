@@ -40,7 +40,7 @@ os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ["PATH"]
 SOURCE_FILE_TO_ADD  = "Training_Data/AML_NOTES_UNIT_1_2_3_4_5_merged.pdf"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DB_PATH       = "./chroma_db"
-COLLECTION_NAME      = "single_pdf_collection"
+COLLECTION_NAME      = "single_pdf_pipeline_collection"
 
 
 # ---------------------------------------------------------------------------
