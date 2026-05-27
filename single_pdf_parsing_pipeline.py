@@ -1,20 +1,23 @@
 # =============================================================================
 # PDF → ChromaDB Semantic Search Pipeline
 # =============================================================================
-# Workflow:
+# This script converts a PDF into semantic chunks, embeds them, stores them in
+# ChromaDB, and executes a sample semantic search query.
+#
+# Pipeline:
 #   1. Extract semantic elements from a PDF using `unstructured`
-#   2. Normalize elements into a stable schema
-#   3. Chunk the document by headings and section boundaries
-#   4. Generate vector embeddings using a sentence-transformer model
-#   5. Store chunks + embeddings in a persistent ChromaDB collection
-#   6. Run a semantic search query against the collection
+#   2. Chunk content by headings and section structure
+#   3. Normalize chunks into a consistent metadata schema
+#   4. Generate dense embeddings with a sentence-transformer model
+#   5. Persist chunks, embeddings, and metadata in ChromaDB
+#   6. Query the collection with a natural language prompt
 #
 # Input  : Training_Data/<your_pdf>.pdf
 # Output : ./chroma_db  (persistent vector store)
 # =============================================================================
 
-# Optional: confirm that Tesseract is available on this system.
-# Uncomment if OCR is needed for scanned pages in the PDF.
+# Optional helper: verify Tesseract is installed before enabling OCR support.
+# Uncomment if your PDF contains scanned or image-based pages.
 # import subprocess
 # result = subprocess.run(["which", "tesseract"], capture_output=True, text=True)
 # print(result.stdout)
@@ -27,8 +30,8 @@ import chromadb
 import uuid
 import os
 
-# Ensure Homebrew's Tesseract binary is on PATH for OCR support on macOS.
-# Safe to keep even when OCR is not needed — it won't cause errors.
+# Add Homebrew's Tesseract location to PATH on macOS so OCR works if needed.
+# This is harmless when OCR is not used.
 os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ["PATH"]
 
 # ---------------------------------------------------------------------------
@@ -52,7 +55,7 @@ def partition_pdf_and_print_elements(source_file):
         source_file (str): Path to the PDF file.
 
     Returns:
-        list: Unstructured element objects.
+        list: Unstructured element objects extracted from the PDF.
     """
     print(f"\n{'='*60}")
     print(f"[Step 1] Partitioning PDF: {source_file}")
@@ -81,48 +84,7 @@ def partition_pdf_and_print_elements(source_file):
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Normalization
-# ---------------------------------------------------------------------------
-def normalize_elements(elements):
-    """
-    Flatten heterogeneous unstructured elements into a uniform dictionary schema.
-    This decouples downstream logic from unstructured's internal object types.
-
-    Args:
-        elements (list): Raw unstructured element objects.
-
-    Returns:
-        list[dict]: Normalized document records.
-    """
-    print(f"\n{'='*60}")
-    print(f"[Step 2] Normalizing {len(elements)} elements")
-    print(f"{'='*60}")
-
-    normalized_docs = []
-
-    for idx, el in enumerate(elements):
-        doc = {
-            "id":          f"doc_{idx}",
-            "type":        el.category,
-            "text":        el.text,
-            "page_number": getattr(el.metadata, "page_number", None),
-            "filename":    getattr(el.metadata, "filename", None),
-            "languages":   getattr(el.metadata, "languages", None),
-            "coordinates": str(getattr(el.metadata, "coordinates", None)),
-        }
-        normalized_docs.append(doc)
-
-    if normalized_docs:
-        print(f"[Step 2] ✓ Normalization complete — sample record (index 0):")
-        print(f"  {normalized_docs[0]}\n")
-    else:
-        print("[Step 2] ⚠ Warning: No elements were normalized. Check the PDF input.\n")
-
-    return normalized_docs
-
-
-# ---------------------------------------------------------------------------
-# Step 3 — Chunking
+# Step 2 — Chunking
 # ---------------------------------------------------------------------------
 def chunk_elements(elements):
     """
@@ -141,7 +103,7 @@ def chunk_elements(elements):
         list: Chunked unstructured element objects.
     """
     print(f"\n{'='*60}")
-    print(f"[Step 3] Chunking elements by title/section boundaries")
+    print(f"[Step 2] Chunking elements by title/section boundaries")
     print(f"{'='*60}")
 
     chunks = chunk_by_title(
@@ -151,7 +113,7 @@ def chunk_elements(elements):
         combine_text_under_n_chars=200,
     )
 
-    print(f"[Step 3] ✓ Created {len(chunks)} chunks\n")
+    print(f"[Step 2] ✓ Created {len(chunks)} chunks\n")
 
     # Preview the first 3 chunks
     print("--- Preview: first 3 chunks ---")
@@ -164,15 +126,55 @@ def chunk_elements(elements):
 
 
 # ---------------------------------------------------------------------------
+# Step 3 — Normalization
+# ---------------------------------------------------------------------------
+def normalize_elements(elements):
+    """
+    Flatten heterogeneous unstructured chunks into a uniform dictionary schema.
+    This decouples downstream logic from unstructured's internal object types.
+
+    Args:
+        elements (list): Chunk objects returned by chunk_elements.
+
+    Returns:
+        list[dict]: Normalized document records.
+    """
+    print(f"\n{'='*60}")
+    print(f"[Step 3] Normalizing {len(elements)} elements")
+    print(f"{'='*60}")
+
+    normalized_docs = []
+
+    for idx, el in enumerate(elements):
+        doc = {
+            "id":           f"chunk_{idx}",
+            "text":         el.text.strip(),
+            "element_type": el.category,
+            "page_number":  getattr(el.metadata, "page_number", None) or 0,
+            "section":      getattr(el.metadata, "section", None) or
+                            getattr(el.metadata, "title",   None) or "",
+        }
+        normalized_docs.append(doc)
+
+    if normalized_docs:
+        print(f"[Step 3] ✓ Normalization complete — sample record (index 0):")
+        print(f"  {normalized_docs[0]}\n")
+    else:
+        print("[Step 3] ⚠ Warning: No elements were normalized. Check the PDF input.\n")
+
+    return normalized_docs
+
+
+# ---------------------------------------------------------------------------
 # Step 4 — Embedding Generation
 # ---------------------------------------------------------------------------
-def generate_embeddings(chunks):
+def generate_embeddings(normalized_chunks):
     """
     Encode each chunk into a dense vector using a local sentence-transformer model.
     Returns both the embedding array and the loaded model (to avoid reloading later).
 
     Args:
-        chunks (list): Chunked unstructured element objects.
+        normalized_chunks (list): List of normalized chunk dictionaries.
 
     Returns:
         tuple: (numpy array of embeddings, loaded SentenceTransformer model)
@@ -183,7 +185,7 @@ def generate_embeddings(chunks):
 
     embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-    chunk_texts = [chunk.text for chunk in chunks]
+    chunk_texts = [c["text"] for c in normalized_chunks]  # extract plain text for embedding
     print(f"[Step 4] Encoding {len(chunk_texts)} chunks...")
 
     embeddings = embedding_model.encode(
@@ -199,16 +201,16 @@ def generate_embeddings(chunks):
 # ---------------------------------------------------------------------------
 # Step 5 — ChromaDB Storage
 # ---------------------------------------------------------------------------
-def initialize_chromadb_and_store_chunks(chunks, embeddings, source_file):
+def initialize_chromadb_and_store_chunks(normalized_chunks, embeddings, source_file):
     """
     Persist chunk embeddings and metadata into a local ChromaDB collection.
     Uses a deterministic document_id (UUID5) derived from the source file path
     so the same file always maps to the same ID across runs.
 
     Args:
-        chunks     (list)       : Chunked unstructured element objects.
-        embeddings (np.ndarray) : Embedding vectors aligned with chunks.
-        source_file (str)       : Path to the original PDF (used for metadata).
+        normalized_chunks (list[dict]): Normalized chunk dictionaries.
+        embeddings        (np.ndarray): Embedding vectors aligned with chunks.
+        source_file       (str): Path to the original PDF (used for metadata).
 
     Returns:
         chromadb.Collection: The collection with all chunks inserted.
@@ -224,28 +226,25 @@ def initialize_chromadb_and_store_chunks(chunks, embeddings, source_file):
     collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
     print(f"[Step 5] Collection: '{COLLECTION_NAME}' | Document ID: {document_id}")
-    print(f"[Step 5] Inserting {len(chunks)} chunks...")
+    print(f"[Step 5] Inserting {len(normalized_chunks)} chunks...")
 
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(normalized_chunks):
         collection.add(
-            ids        = [str(uuid.uuid4())],
-            documents  = [chunk.text.strip()],
-            embeddings = [embeddings[i].tolist()],
+            ids        = [str(uuid.uuid4())],          # unique record id for ChromaDB
+            documents  = [chunk["text"]],
+            embeddings = [embeddings[i].tolist()],     # serialize vector to list format
             metadatas  = [{
                 "document_id":  document_id,
-                "chunk_id":     f"chunk_{i}",
-                "element_type": chunk.category,
-                # page_number falls back to 0 if metadata is absent
-                "page_number":  getattr(chunk.metadata, "page_number", None) or 0,
-                # prefer 'section', fall back to 'title', then empty string
-                "section":      getattr(chunk.metadata, "section", None) or
-                                getattr(chunk.metadata, "title",   None) or "",
+                "chunk_id":     chunk["id"],
+                "element_type": chunk["element_type"],
+                "page_number":  chunk["page_number"],
+                "section":      chunk["section"],
                 "source_file":  source_file,
                 "created_at":   created_at,
             }]
         )
 
-    print(f"[Step 5] ✓ Successfully inserted {len(chunks)} chunks into ChromaDB\n")
+    print(f"[Step 5] ✓ Successfully inserted {len(normalized_chunks)} chunks into ChromaDB\n")
 
     return collection
 
@@ -260,9 +259,12 @@ def query_chromadb(collection, embedding_model, question):
     easy source tracing.
 
     Args:
-        collection      (chromadb.Collection)  : Target ChromaDB collection.
-        embedding_model (SentenceTransformer)  : Already-loaded embedding model.
-        question        (str)                  : Natural language search query.
+        collection      (chromadb.Collection): Target ChromaDB collection.
+        embedding_model (SentenceTransformer): Already-loaded embedding model.
+        question        (str): Natural language search query.
+
+    Returns:
+        None
     """
     print(f"\n{'='*60}")
     print(f"[Step 6] Running semantic search")
@@ -301,19 +303,19 @@ def main():
     # Step 1 — Extract semantic elements from the PDF
     elements = partition_pdf_and_print_elements(SOURCE_FILE_TO_ADD)
 
-    # Step 2 — Normalize into a stable schema (useful for debugging/logging)
-    normalize_elements(elements)
-
-    # Step 3 — Chunk by headings and section boundaries
+    # Step 2 — Group elements into chunks based on titles and section breaks
     chunks = chunk_elements(elements)
+    
+    # Step 3 — Convert chunk objects into consistent metadata records
+    normalized_chunks = normalize_elements(chunks)
 
-    # Step 4 — Generate vector embeddings (model returned to avoid reloading)
-    embeddings, embedding_model = generate_embeddings(chunks)
+    # Step 4 — Generate dense vectors for each normalized chunk
+    embeddings, embedding_model = generate_embeddings(normalized_chunks)
 
-    # Step 5 — Persist chunks + embeddings into ChromaDB
-    collection = initialize_chromadb_and_store_chunks(chunks, embeddings, SOURCE_FILE_TO_ADD)
+    # Step 5 — Save chunks, embeddings, and metadata in ChromaDB
+    collection = initialize_chromadb_and_store_chunks(normalized_chunks, embeddings, SOURCE_FILE_TO_ADD)
 
-    # Step 6 — Run a semantic search query
+    # Step 6 — Query the vector store with a sample question
     query_chromadb(collection, embedding_model, question="What is k means clustering?")
 
     print("\n[Done] Pipeline completed successfully.")
