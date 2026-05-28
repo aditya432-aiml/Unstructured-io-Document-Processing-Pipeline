@@ -298,4 +298,5 @@ Declared in `pyproject.toml` and pinned in `uv.lock`:
 - **Parallel script and `device="mps"`.** The parallel pipeline hardcodes Apple Silicon GPU (`device="mps"`). Update to `"cuda"` or `"cpu"` as needed before running on other hardware.
 - **No deduplication in single PDF script.** Unlike the parallel variant, `single_pdf_parsing_pipeline.py` does not check for existing embeddings before inserting. Running it twice on the same PDF will create duplicate chunks. Add a `collection.get(where={"source_file": pdf_path})` guard if needed.
 - **ChromaDB is local only.** The pipeline uses `PersistentClient` which stores data on disk. For multi-machine or production deployments, consider switching to ChromaDB's HTTP client or a managed vector database.
+- **`normalize_elements` is called after chunking.** Normalization flattens the chunked unstructured objects into plain dicts — it runs on chunks, not raw elements, so the order is: partition → chunk → normalize → embed → store.
 - **macOS PATH override.** The line `os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ.get("PATH", "")` is safe to leave on non-macOS systems; it has no effect if the path does not exist.
